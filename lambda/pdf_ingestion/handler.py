@@ -89,7 +89,7 @@ def _process_file(source_bucket: str, s3_key: str):
         "parse_warnings": canonical.get("warnings", []),
     }
     upload_json(BUCKET, f"{AUDIT_PREFIX}{tax_year}/{document_id}-manifest.json", manifest)
-    logger.info("Successfully processed %s → %s", s3_key, cleansed_base)
+    logger.info("Successfully processed %s → %s/%s", s3_key, CLEANSED_PREFIX, broker)
 
 
 def _extract_metadata(s3_key: str) -> dict:
