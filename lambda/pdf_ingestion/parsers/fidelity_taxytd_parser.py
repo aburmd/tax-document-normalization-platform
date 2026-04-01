@@ -45,15 +45,15 @@ class FidelityTaxYtdParser(BaseParser):
         summary = {}
         for label, key in [("Short-term", "short_term"), ("Long-term", "long_term"), ("Total", "total")]:
             m = re.search(
-                rf'{label}\s+\+?\$?([\d,.]+)\s+[-]?\$?([\d,.]+|--)\s+\+?\$?([\d,.]+|--)\s+[+\-]?\$?([\d,.]+)',
+                rf'{label}\s+([+\-])\$([\d,.]+)\s+([+\-])?\$?([\d,.]+|--)\s+([+\-])?\$?([\d,.]+|--)\s+([+\-])\$([\d,.]+)',
                 text
             )
             if m:
                 summary[key] = {
-                    "realized_gain": _parse_amount(m.group(1)),
-                    "realized_loss": -_parse_amount(m.group(2)),
-                    "disallowed_loss": _parse_amount(m.group(3)),
-                    "net_gain_loss": _parse_signed_amount_from_context(m.group(4), m.group(0)),
+                    "realized_gain": _parse_amount(m.group(2)),
+                    "realized_loss": -_parse_amount(m.group(4)),
+                    "disallowed_loss": _parse_amount(m.group(6)),
+                    "net_gain_loss": (1 if m.group(7) == '+' else -1) * _parse_amount(m.group(8)),
                 }
         return summary
 

@@ -74,41 +74,42 @@ class FidelityStatementParser(BaseParser):
     def _parse_positions(self, text: str) -> list:
         positions = []
 
-        # Core account (money market): DESCRIPTION (SYMBOL) ... QTY $PRICE $MARKET_VALUE
+        # Core account (money market): multi-line — DESCRIPTION $BEG QTY $PRICE $END ... \n MARKET (SPAXX)
         core_m = re.search(
-            r'(FIDELITY\s+\w+\s+MONEY\s+\w+)\s*\((\w+)\)\s+.*?'
-            r'([\d,.]+)\s+\$([\d.]+)\s+\$([\d,.]+)',
-            text, re.DOTALL
+            r'(FIDELITY\s+\w+\s+MONEY)\s+\$([\d,.]+)\s+([\d,.]+)\s+\$([\d.]+)\s+\$([\d,.]+).*?\n'
+            r'\w+\s+\((\w+)\)',
+            text
         )
         if core_m:
             positions.append({
                 "type": "core",
-                "symbol": core_m.group(2),
+                "symbol": core_m.group(6),
                 "description": core_m.group(1).strip(),
+                "beginning_market_value": _parse_amount(core_m.group(2)),
                 "quantity": _parse_amount(core_m.group(3)),
                 "price": _parse_amount(core_m.group(4)),
                 "market_value": _parse_amount(core_m.group(5)),
             })
 
-        # ETPs and Stocks: M?DESCRIPTION (SYMBOL) BEG_MV QTY PRICE END_MV COST GAIN EAI
-        # The M prefix indicates marginable
+        # ETPs and Stocks — two formats:
+        # 1. M?DESCRIPTION (SYMBOL) BEG_MV QTY PRICE END_MV COST GAIN EAI
+        # 2. M?DESCRIPTION BEG_MV QTY PRICE END_MV COST GAIN EAI  (symbol on next line as (SYMBOL))
+        # First: inline symbol format
         pos_pattern = re.compile(
-            r'M?([A-Z][A-Z\s&]+?)\s*\((\w+)\)\s+'  # description (symbol)
-            r'([\d,.]+)\s+'                           # beginning MV
-            r'([\d,.]+)\s+'                           # quantity
-            r'([\d,.]+)\s+'                           # price
-            r'([\d,.]+)\s+'                           # ending MV
-            r'([\d,.]+)t?\s+'                         # cost basis (t = third party)
-            r'-?\$?([\d,.]+)\s*'                      # unrealized gain/loss
+            r'M?([A-Z][A-Z\s&]+?)\s*\((\w+)\)\s+'
+            r'\$?([\d,.]+)\s+'                     # beginning MV
+            r'([\d,.]+)\s+'                         # quantity
+            r'\$?([\d,.]+)\s+'                      # price
+            r'\$?([\d,.]+)\s+'                      # ending MV
+            r'\$?([\d,.]+)t?\s+'                    # cost basis
+            r'-?\$?([\d,.]+)'                       # unrealized gain/loss
         )
         for m in pos_pattern.finditer(text):
             desc = m.group(1).strip()
             symbol = m.group(2)
-            # Skip if it's a subtotal line
             if 'Total' in desc or symbol in ('AI',):
                 continue
             gain = _parse_amount(m.group(8))
-            # Check if negative
             context = text[m.start():m.end()]
             if '-$' in context or '-' + m.group(8) in context:
                 gain = -gain
@@ -123,6 +124,35 @@ class FidelityStatementParser(BaseParser):
                 "cost_basis": _parse_amount(m.group(7)),
                 "unrealized_gain_loss": gain,
             })
+
+        # Second: symbol on next line — DESCRIPTION $BEG QTY $PRICE $END $COST $GAIN $EAI\n(SYMBOL)
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            sym_m = re.match(r'^\(([A-Z]{1,5})\)\s+[\d.]+', line.strip())
+            if sym_m and i > 0:
+                symbol = sym_m.group(1)
+                if any(p["symbol"] == symbol for p in positions):
+                    continue
+                prev = lines[i - 1].strip()
+                data_m = re.match(
+                    r'M?(.+?)\s+\$?([\d,.]+)\s+([\d,.]+)\s+\$?([\d,.]+)\s+\$?([\d,.]+)\s+\$?([\d,.]+)t?\s+[-]?\$?([\d,.]+)',
+                    prev
+                )
+                if data_m:
+                    gain = _parse_amount(data_m.group(7))
+                    if '-$' in prev or '-' + data_m.group(7) in prev:
+                        gain = -gain
+                    positions.append({
+                        "type": "etp" if symbol in _ETP_SYMBOLS else "stock",
+                        "symbol": symbol,
+                        "description": data_m.group(1).strip(),
+                        "beginning_market_value": _parse_amount(data_m.group(2)),
+                        "quantity": _parse_amount(data_m.group(3)),
+                        "price": _parse_amount(data_m.group(4)),
+                        "market_value": _parse_amount(data_m.group(5)),
+                        "cost_basis": _parse_amount(data_m.group(6)),
+                        "unrealized_gain_loss": gain,
+                    })
         return positions
 
     def _parse_income_summary(self, text: str) -> dict:

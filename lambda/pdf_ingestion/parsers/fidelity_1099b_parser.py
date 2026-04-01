@@ -68,8 +68,7 @@ class Fidelity1099BParser(BaseParser):
 
     def _parse_1099b_summary(self, text: str) -> dict:
         summary = {}
-        section = text[:5000]  # Summary is on page 2
-
+        # Lines have no spaces between words: "Short-termtransactionsforwhichbasisisreportedtotheIRS 163,399.99 ..."
         patterns = [
             ("short_term_reported", r'Short-termtransactionsforwhichbasisisreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
             ("short_term_not_reported", r'Short-termtransactionsforwhichbasisisnotreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
@@ -77,7 +76,7 @@ class Fidelity1099BParser(BaseParser):
             ("long_term_not_reported", r'Long-termtransactionsforwhichbasisisnotreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
         ]
         for key, pattern in patterns:
-            m = re.search(pattern, section)
+            m = re.search(pattern, text)
             if m:
                 summary[key] = {
                     "proceeds": _parse_amount(m.group(1)),
@@ -87,8 +86,8 @@ class Fidelity1099BParser(BaseParser):
                     "gain_loss": _parse_amount(m.group(5)),
                 }
 
-        # Total line
-        total_m = re.search(r'(\d{3},\d{3}\.\d{2})\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\n', section)
+        # Total line: starts with a large number (total proceeds)
+        total_m = re.search(r'^([\d,]+\.\d{2})\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)$', text, re.MULTILINE)
         if total_m:
             summary["total"] = {
                 "proceeds": _parse_amount(total_m.group(1)),
@@ -132,44 +131,33 @@ class Fidelity1099BParser(BaseParser):
                 current_cusip = sec_m.group(3)
                 continue
 
-            # Transaction line: Sale QTY DATE_ACQ DATE_SOLD PROCEEDS COST_BASIS [MARKET_DISC] [WASH] GAIN_LOSS
+            # Transaction line: Sale QTY DATE_ACQ DATE_SOLD PROCEEDS COST_BASIS [GAIN_LOSS] [WASH_SALE]
             txn_m = re.match(
                 r'Sale\s+'
                 r'([\d,.]+)\s+'           # quantity
                 r'(\d{2}/\d{2}/\d{2})\s+' # date acquired
                 r'(\d{2}/\d{2}/\d{2})\s+' # date sold
                 r'([\d,.]+)\s+'           # proceeds
-                r'([\d,.]+)\s*'           # cost basis
-                r'([\d,.]+)?\s*'          # gain/loss (might have wash sale before it)
-                r'(-?[\d,.]+)?',          # possible additional field
+                r'([\d,.]+)'              # cost basis
+                r'(.*)',                   # rest of line (gain, wash)
                 line
             )
             if txn_m and current_symbol:
                 proceeds = _parse_amount(txn_m.group(4))
                 cost_basis = _parse_amount(txn_m.group(5))
-                # Parse remaining fields — could be gain_loss alone, or wash_sale + gain_loss
-                field6 = _parse_amount(txn_m.group(6)) if txn_m.group(6) else None
-                field7 = _parse_amount(txn_m.group(7)) if txn_m.group(7) else None
+                rest = txn_m.group(6).strip()
 
-                if field7 is not None:
-                    wash_sale = field6 if field6 is not None and abs(field6 - (proceeds - cost_basis)) > 0.02 else 0.0
-                    gain_loss = field7 if wash_sale != 0.0 else (field6 if field6 is not None else proceeds - cost_basis)
-                elif field6 is not None:
-                    gain_loss = field6
-                    wash_sale = 0.0
+                # Parse remaining numbers from rest of line
+                nums = re.findall(r'-?[\d,.]+', rest)
+                wash_sale = 0.0
+                if len(nums) >= 2:
+                    # Format: GAIN -WASH
+                    gain_loss = _parse_signed(nums[0])
+                    wash_sale = abs(_parse_signed(nums[1]))
+                elif len(nums) == 1:
+                    gain_loss = _parse_signed(nums[0])
                 else:
-                    gain_loss = proceeds - cost_basis
-                    wash_sale = 0.0
-
-                # Check for negative gain (wash sale indicator)
-                if '-' in line.split(str(txn_m.group(5)))[-1]:
-                    # There's a negative number after cost basis
-                    neg_m = re.search(r'(-[\d,.]+)', line.split(str(txn_m.group(5)))[-1])
-                    if neg_m:
-                        wash_sale = _parse_amount(neg_m.group(1))
-
-                # Simpler approach: just compute gain from proceeds - cost
-                computed_gain = round(proceeds - cost_basis, 2)
+                    gain_loss = round(proceeds - cost_basis, 2)
 
                 transactions.append({
                     "symbol": current_symbol,
@@ -180,38 +168,18 @@ class Fidelity1099BParser(BaseParser):
                     "date_sold": _normalize_date(txn_m.group(3)),
                     "proceeds": proceeds,
                     "cost_basis": cost_basis,
-                    "wash_sale_loss_disallowed": 0.0,
-                    "realized_gain_loss": computed_gain,
+                    "wash_sale_loss_disallowed": wash_sale,
+                    "realized_gain_loss": gain_loss,
                     "section": current_section,
                     "holding_period": "LONG_TERM" if "long_term" in current_section else "SHORT_TERM",
                 })
 
-        # Post-process: detect wash sales from lines with extra negative numbers
         self._fix_wash_sales(transactions, text)
         return transactions
 
     def _fix_wash_sales(self, transactions: list, text: str):
-        """Fix wash sale amounts by re-scanning lines with negative values after cost basis."""
-        for line in text.split('\n'):
-            # Lines with wash sale have format: Sale QTY DATE DATE PROCEEDS COST GAIN WASH_NEGATIVE
-            wash_m = re.match(
-                r'Sale\s+[\d,.]+\s+\d{2}/\d{2}/\d{2}\s+\d{2}/\d{2}/\d{2}\s+'
-                r'([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+(-[\d,.]+)',
-                line.strip()
-            )
-            if wash_m:
-                proceeds = _parse_amount(wash_m.group(1))
-                cost_basis = _parse_amount(wash_m.group(2))
-                gain = _parse_amount(wash_m.group(3))
-                wash = abs(_parse_amount(wash_m.group(4)))
-                # Find matching transaction and update
-                for txn in transactions:
-                    if (abs(txn["proceeds"] - proceeds) < 0.01 and
-                        abs(txn["cost_basis"] - cost_basis) < 0.01 and
-                        txn["wash_sale_loss_disallowed"] == 0.0):
-                        txn["wash_sale_loss_disallowed"] = wash
-                        txn["realized_gain_loss"] = round(gain, 2)
-                        break
+        """No-op — wash sales are now handled inline during parsing."""
+        pass
 
     @staticmethod
     def _summary_to_list(summary: dict) -> list:
@@ -222,6 +190,14 @@ def _parse_amount(s: str) -> float:
     if not s or s == "--":
         return 0.0
     return float(re.sub(r'[^0-9.]', '', s) or "0")
+
+
+def _parse_signed(s: str) -> float:
+    if not s or s == "--":
+        return 0.0
+    negative = s.strip().startswith('-')
+    val = float(re.sub(r'[^0-9.]', '', s) or "0")
+    return -val if negative else val
 
 
 def _normalize_date(d: str) -> str:
