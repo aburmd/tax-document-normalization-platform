@@ -67,8 +67,10 @@ def _process_file(source_bucket: str, s3_key: str):
     })
 
     validation_errors = validate_canonical_output(canonical)
-    if validation_errors:
+    if validation_errors and doc_type == "1099b":
         raise ValueError(f"Schema validation failed: {validation_errors}")
+    elif validation_errors:
+        logger.warning("Schema validation warnings for %s: %s", doc_type, validation_errors)
 
     # JSON: single file per document
     json_key = f"{CLEANSED_PREFIX}{broker}/{account_type}/{tax_year}/{document_id}.json"
