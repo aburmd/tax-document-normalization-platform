@@ -30,10 +30,12 @@ def upload_csv_sections(bucket: str, prefix: str, broker: str, account_type: str
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             continue
         sanitized = [_sanitize_row(r) for r in rows]
+        all_keys = dict.fromkeys(k for row in sanitized for k in row.keys())
         buf = io.StringIO()
-        writer = csv.DictWriter(buf, fieldnames=sanitized[0].keys())
+        writer = csv.DictWriter(buf, fieldnames=all_keys, extrasaction='ignore')
         writer.writeheader()
-        writer.writerows(sanitized)
+        for row in sanitized:
+            writer.writerow({k: row.get(k, '') for k in all_keys})
         key = f"{prefix}{broker}/{section_name}/account_type={account_type}/tax_year={tax_year}/{document_id}.csv"
         logger.info("Uploading CSV (%d rows) → s3://%s/%s", len(sanitized), bucket, key)
         s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue(), ContentType="text/csv")
