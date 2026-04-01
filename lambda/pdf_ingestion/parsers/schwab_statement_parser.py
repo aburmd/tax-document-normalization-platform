@@ -108,13 +108,21 @@ class SchwabStatementParser(BaseParser):
                 "change_in_period": _parse_signed_amount(f"({cash_m.group(4)})") if "(" in text[cash_m.start():cash_m.end()+5] else _parse_amount(cash_m.group(4)),
             })
 
-        # ETF/Stock positions
-        pos_pattern = re.compile(
-            r'(\w+)\s+(.+?)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+\(?([\d,.]+)\)?\s+'
-            r'(?:N/A|[\d,.]+)\s+(?:N/A|[\d,.]+)\s+(\d+)%',
+        # ETF/Stock positions — format: SYMBOL DESCRIPTION, QTY PRICE MARKET COST (GAIN) YIELD INCOME PCT%
+        etf_pattern = re.compile(
+            r'^([A-Z]{2,5})\s+'           # symbol (2-5 uppercase letters)
+            r'(\S.*?),\s+'               # description (ends with comma)
+            r'([\d,.]+)\s+'              # quantity
+            r'([\d,.]+)\s+'              # price
+            r'([\d,.]+)\s+'              # market value
+            r'([\d,.]+)\s+'              # cost basis
+            r'\(?([\d,.]+)\)?\s+'        # unrealized gain/loss
+            r'(?:N/A|[\d,.]+%)\s+'       # yield
+            r'(?:N/A|[\d,.]+)\s+'        # income
+            r'(\d+)%',                    # pct of account
+            re.MULTILINE
         )
-        etf_section = text[text.find("Exchange Traded Funds"):] if "Exchange Traded Funds" in text else ""
-        for m in pos_pattern.finditer(etf_section):
+        for m in etf_pattern.finditer(text):
             positions.append({
                 "type": "etf",
                 "symbol": m.group(1),
@@ -126,23 +134,6 @@ class SchwabStatementParser(BaseParser):
                 "unrealized_gain_loss": _parse_signed_amount(m.group(7)),
                 "pct_of_account": int(m.group(8)),
             })
-
-        # Simpler position extraction as fallback
-        if len(positions) <= 1:
-            simple_pos = re.compile(
-                r'(TQQQ|FNGA|GLD|FNGU)\s+\S.*?\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+\(?([\d,.]+)\)?'
-            )
-            for m in simple_pos.finditer(text):
-                if not any(p["symbol"] == m.group(1) for p in positions):
-                    positions.append({
-                        "type": "etf",
-                        "symbol": m.group(1),
-                        "quantity": _parse_amount(m.group(2)),
-                        "price": _parse_amount(m.group(3)),
-                        "market_value": _parse_amount(m.group(4)),
-                        "cost_basis": _parse_amount(m.group(5)),
-                        "unrealized_gain_loss": _parse_signed_amount(m.group(6)),
-                    })
         return positions
 
     def _parse_transactions(self, text: str) -> list:
