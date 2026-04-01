@@ -21,8 +21,11 @@ def upload_json(bucket: str, key: str, data: dict):
     s3.put_object(Bucket=bucket, Key=key, Body=json.dumps(data, indent=2, default=str), ContentType="application/json")
 
 
-def upload_csv(bucket: str, key: str, canonical: dict):
-    """Write all list sections of canonical output as separate CSV files."""
+def upload_csv_sections(bucket: str, prefix: str, broker: str, account_type: str, tax_year: str, document_id: str, canonical: dict):
+    """Write each list section as a separate CSV in Hive-partitioned path for Athena.
+
+    Path: {prefix}{broker}/{section}/account_type={account_type}/tax_year={tax_year}/{document_id}.csv
+    """
     for section_name, rows in canonical.items():
         if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
             continue
@@ -31,9 +34,9 @@ def upload_csv(bucket: str, key: str, canonical: dict):
         writer = csv.DictWriter(buf, fieldnames=sanitized[0].keys())
         writer.writeheader()
         writer.writerows(sanitized)
-        section_key = key.replace(".csv", f"_{section_name}.csv")
-        logger.info("Uploading CSV (%d rows) → s3://%s/%s", len(sanitized), bucket, section_key)
-        s3.put_object(Bucket=bucket, Key=section_key, Body=buf.getvalue(), ContentType="text/csv")
+        key = f"{prefix}{broker}/{section_name}/account_type={account_type}/tax_year={tax_year}/{document_id}.csv"
+        logger.info("Uploading CSV (%d rows) → s3://%s/%s", len(sanitized), bucket, key)
+        s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue(), ContentType="text/csv")
 
 
 def _sanitize_row(row: dict) -> dict:

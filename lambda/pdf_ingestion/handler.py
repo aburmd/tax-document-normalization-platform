@@ -4,7 +4,7 @@ import os
 import uuid
 from datetime import datetime, timezone
 
-from common.s3_utils import download_file, upload_json, upload_csv
+from common.s3_utils import download_file, upload_json, upload_csv_sections
 from common.checksum_utils import compute_checksum
 from common.schema_validator import validate_canonical_output
 from common.mapping_loader import load_mapping
@@ -70,15 +70,18 @@ def _process_file(source_bucket: str, s3_key: str):
     if validation_errors:
         raise ValueError(f"Schema validation failed: {validation_errors}")
 
-    cleansed_base = f"{CLEANSED_PREFIX}{broker}/{account_type}/{tax_year}/{document_id}"
-    upload_json(BUCKET, f"{cleansed_base}.json", canonical)
-    upload_csv(BUCKET, f"{cleansed_base}.csv", sanitize_for_csv(canonical))
+    # JSON: single file per document
+    json_key = f"{CLEANSED_PREFIX}{broker}/{account_type}/{tax_year}/{document_id}.json"
+    upload_json(BUCKET, json_key, canonical)
+
+    # CSVs: Hive-partitioned per section for Athena
+    upload_csv_sections(BUCKET, CLEANSED_PREFIX, broker, account_type, tax_year, document_id, sanitize_for_csv(canonical))
 
     manifest = {
         "document_id": document_id,
         "source_s3_uri": f"s3://{source_bucket}/{s3_key}",
-        "output_json": f"s3://{BUCKET}/{cleansed_base}.json",
-        "output_csv": f"s3://{BUCKET}/{cleansed_base}.csv",
+        "output_json": f"s3://{BUCKET}/{json_key}",
+        "output_csv_prefix": f"s3://{BUCKET}/{CLEANSED_PREFIX}{broker}/",
         "parser_used": broker,
         "extraction_timestamp": datetime.now(timezone.utc).isoformat(),
         "checksum": checksum,
