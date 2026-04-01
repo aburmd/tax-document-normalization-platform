@@ -49,11 +49,11 @@ class Schwab1099BParser(BaseParser):
 
         return {
             "document_metadata": doc_meta,
-            "dividends_1099div": raw_data["dividends"],
-            "interest_1099int": raw_data["interest"],
+            "dividends_1099div": [raw_data["dividends"]],
+            "interest_1099int": [raw_data["interest"]],
             "transactions_1099b": all_transactions,
             "realized_gain_loss_detail": raw_data["realized_gain_loss_detail"],
-            "realized_gain_loss_summary": raw_data["realized_gain_loss_summary"],
+            "realized_gain_loss_summary": self._summary_dict_to_list(raw_data["realized_gain_loss_summary"]),
             "dividend_detail": raw_data["dividend_detail"],
             "interest_detail": raw_data["interest_detail"],
             "transfers": [],
@@ -61,6 +61,17 @@ class Schwab1099BParser(BaseParser):
             "positions": [],
             "warnings": [],
         }
+
+    @staticmethod
+    def _summary_dict_to_list(summary: dict) -> list:
+        """Convert realized_gain_loss_summary dict-of-dicts to list-of-dicts for CSV."""
+        rows = []
+        for category, values in summary.items():
+            if isinstance(values, dict):
+                row = {"category": category}
+                row.update(values)
+                rows.append(row)
+        return rows
 
     def _extract_masked_account(self, text: str) -> str:
         m = re.search(r'(\d{4})-(\d{4})', text)
@@ -363,7 +374,7 @@ class Schwab1099BParser(BaseParser):
     def _parse_dividend_detail(self, text: str) -> list:
         """Parse Detail Information of Dividends and Distributions from Year-End Summary."""
         dividends = []
-        section = _extract_section(text, "Detail Information of Dividends", "Detail Information of Interest")
+        section = _extract_section_rfind(text, "Detail Information of Dividends", "Detail Information of Interest")
         if not section:
             return dividends
 
@@ -394,7 +405,7 @@ class Schwab1099BParser(BaseParser):
     def _parse_interest_detail(self, text: str) -> list:
         """Parse Detail Information of Interest Income from Year-End Summary."""
         interests = []
-        section = _extract_section(text, "Detail Information of Interest", "REALIZED GAIN")
+        section = _extract_section_rfind(text, "Detail Information of Interest", "REALIZED GAIN")
         if not section:
             return interests
 
@@ -413,6 +424,16 @@ class Schwab1099BParser(BaseParser):
 
 def _extract_section(text: str, start_marker: str, end_marker: str) -> str:
     start = text.find(start_marker)
+    if start < 0:
+        return ""
+    end = text.find(end_marker, start + len(start_marker))
+    if end < 0:
+        end = start + 5000
+    return text[start:end]
+
+
+def _extract_section_rfind(text: str, start_marker: str, end_marker: str) -> str:
+    start = text.rfind(start_marker)
     if start < 0:
         return ""
     end = text.find(end_marker, start + len(start_marker))
