@@ -22,13 +22,23 @@ def upload_json(bucket: str, key: str, data: dict):
 
 
 def upload_csv(bucket: str, key: str, canonical: dict):
-    rows = canonical.get("transactions", [])
-    if not rows:
-        logger.info("No transaction rows for CSV: %s", key)
-        return
-    buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=rows[0].keys())
-    writer.writeheader()
-    writer.writerows(rows)
-    logger.info("Uploading CSV (%d rows) → s3://%s/%s", len(rows), bucket, key)
-    s3.put_object(Bucket=bucket, Key=key, Body=buf.getvalue(), ContentType="text/csv")
+    """Write all list sections of canonical output as separate CSV files."""
+    for section_name, rows in canonical.items():
+        if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+            continue
+        sanitized = [_sanitize_row(r) for r in rows]
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=sanitized[0].keys())
+        writer.writeheader()
+        writer.writerows(sanitized)
+        section_key = key.replace(".csv", f"_{section_name}.csv")
+        logger.info("Uploading CSV (%d rows) → s3://%s/%s", len(sanitized), bucket, section_key)
+        s3.put_object(Bucket=bucket, Key=section_key, Body=buf.getvalue(), ContentType="text/csv")
+
+
+def _sanitize_row(row: dict) -> dict:
+    """Remove commas from all string values to ensure clean CSV output."""
+    return {
+        k: str(v).replace(",", "") if isinstance(v, str) else v
+        for k, v in row.items()
+    }

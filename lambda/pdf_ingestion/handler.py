@@ -8,7 +8,8 @@ from common.s3_utils import download_file, upload_json, upload_csv
 from common.checksum_utils import compute_checksum
 from common.schema_validator import validate_canonical_output
 from common.mapping_loader import load_mapping
-from parsers.parser_router import route_parser
+from common.sanitize import sanitize_for_csv
+from parsers.parser_router import route_parser, detect_doc_type
 
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
@@ -43,8 +44,15 @@ def _process_file(source_bucket: str, s3_key: str):
     local_path = download_file(source_bucket, s3_key)
     checksum = compute_checksum(local_path)
 
+    # Detect document type from PDF content
+    import pdfplumber
+    with pdfplumber.open(local_path) as pdf:
+        first_page_text = (pdf.pages[0].extract_text() or "") if pdf.pages else ""
+    doc_type = detect_doc_type(first_page_text)
+    logger.info("Detected doc_type=%s for broker=%s", doc_type, broker)
+
     mapping = load_mapping(broker)
-    parser = route_parser(broker)
+    parser = route_parser(broker, doc_type)
     raw_data = parser.parse(local_path, metadata)
 
     canonical = parser.to_canonical(raw_data, mapping, {
@@ -64,7 +72,7 @@ def _process_file(source_bucket: str, s3_key: str):
 
     cleansed_base = f"{CLEANSED_PREFIX}{broker}/{account_type}/{tax_year}/{document_id}"
     upload_json(BUCKET, f"{cleansed_base}.json", canonical)
-    upload_csv(BUCKET, f"{cleansed_base}.csv", canonical)
+    upload_csv(BUCKET, f"{cleansed_base}.csv", sanitize_for_csv(canonical))
 
     manifest = {
         "document_id": document_id,
