@@ -13,7 +13,7 @@ echo "=== Packaging Lambda: $ZIP_NAME ==="
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR/package"
 
-pip3 install -r "$LAMBDA_DIR/requirements.txt" -t "$BUILD_DIR/package" --quiet --platform manylinux2014_x86_64 --only-binary=:all:
+pip3 install -r "$LAMBDA_DIR/requirements.txt" -t "$BUILD_DIR/package" --quiet --platform manylinux2014_x86_64 --implementation cp --python-version 3.12 --only-binary=:all:
 
 cp -r "$LAMBDA_DIR"/*.py "$BUILD_DIR/package/"
 cp -r "$LAMBDA_DIR/parsers" "$BUILD_DIR/package/"
