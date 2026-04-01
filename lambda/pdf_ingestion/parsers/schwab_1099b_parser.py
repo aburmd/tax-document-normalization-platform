@@ -16,6 +16,7 @@ class Schwab1099BParser(BaseParser):
         return {
             "full_text": full_text,
             "metadata": metadata,
+            "cusip_symbol_map": self._build_cusip_symbol_map(full_text),
             "dividends": self._parse_1099_div(full_text),
             "interest": self._parse_1099_int(full_text),
             "short_term_reported": self._parse_1099b_transactions(full_text, "SHORT-TERM", "Box A"),
@@ -33,19 +34,45 @@ class Schwab1099BParser(BaseParser):
         doc_meta["parse_status"] = "success"
         doc_meta["source_format"] = "schwab_1099b_composite"
 
+        # Build CUSIP→symbol map from all sources
+        cusip_symbol_map = raw_data.get("cusip_symbol_map", {})
+        for txn_list in [raw_data["short_term_reported"], raw_data["short_term_not_reported"], raw_data["long_term_reported"]]:
+            for txn in txn_list:
+                if txn.get("cusip") and txn.get("symbol"):
+                    cusip_symbol_map[txn["cusip"]] = txn["symbol"]
+
         all_transactions = []
         for txn in raw_data["short_term_reported"]:
             txn["holding_period"] = "SHORT_TERM"
             txn["irs_reporting"] = "Box A - basis reported to IRS"
+            if not txn.get("symbol") and txn.get("cusip"):
+                txn["symbol"] = cusip_symbol_map.get(txn["cusip"])
+            if not txn.get("symbol"):
+                txn["symbol"] = _symbol_from_description(txn["description"])
             all_transactions.append(txn)
         for txn in raw_data["short_term_not_reported"]:
             txn["holding_period"] = "SHORT_TERM"
             txn["irs_reporting"] = "Box B - basis available but not reported"
+            if not txn.get("symbol") and txn.get("cusip"):
+                txn["symbol"] = cusip_symbol_map.get(txn["cusip"])
+            if not txn.get("symbol"):
+                txn["symbol"] = _symbol_from_description(txn["description"])
             all_transactions.append(txn)
         for txn in raw_data["long_term_reported"]:
             txn["holding_period"] = "LONG_TERM"
             txn["irs_reporting"] = "Box D - basis reported to IRS"
+            if not txn.get("symbol") and txn.get("cusip"):
+                txn["symbol"] = cusip_symbol_map.get(txn["cusip"])
+            if not txn.get("symbol"):
+                txn["symbol"] = _symbol_from_description(txn["description"])
             all_transactions.append(txn)
+
+        # Backfill symbols in year-end detail
+        for txn in raw_data["realized_gain_loss_detail"]:
+            if not txn.get("symbol") and txn.get("cusip"):
+                txn["symbol"] = cusip_symbol_map.get(txn["cusip"])
+            if not txn.get("symbol"):
+                txn["symbol"] = _symbol_from_description(txn["description"])
 
         return {
             "document_metadata": doc_meta,
@@ -80,6 +107,27 @@ class Schwab1099BParser(BaseParser):
     def _extract_tax_year(self, text: str) -> str:
         m = re.search(r'TAX YEAR (\d{4})', text)
         return m.group(1) if m else "unknown"
+
+    def _build_cusip_symbol_map(self, text: str) -> dict:
+        """Build CUSIP→symbol map from all pages."""
+        cmap = {}
+        # Pattern 1: CUSIP / SYMBOL on 1099-B pages (most reliable)
+        for m in re.finditer(r'(\d{9})\s*/\s*([A-Z]{1,5})\s', text):
+            cmap[m.group(1)] = m.group(2)
+        # Pattern 2: Dividend detail lines "DESCRIPTION SYMBOL CUSIP $ amount"
+        for m in re.finditer(r'\b([A-Z]{2,5})\s+(\d{9})\s+\$\s*[\d,.]+', text):
+            sym = m.group(1)
+            cusip = m.group(2)
+            if cusip not in cmap and len(sym) <= 5:
+                cmap[cusip] = sym
+        # Pattern 3: Year-End lines with known format "SYMBOL CUSIP QTY DATE"
+        # Only use if symbol is 1-5 uppercase letters followed by 9-digit CUSIP
+        for m in re.finditer(r'\b([A-Z]{1,5})\s+(\d{9})\s+[\d,.]+\s+\d{2}/\d{2}/\d{2}', text):
+            sym = m.group(1)
+            cusip = m.group(2)
+            if cusip not in cmap:
+                cmap[cusip] = sym
+        return cmap
 
     def _parse_1099_div(self, text: str) -> dict:
         div = {}
@@ -187,6 +235,14 @@ class Schwab1099BParser(BaseParser):
         cusip_pattern = re.compile(r'(\d{9})\s*/?\s*(\w+)?\s+(\d{2}/\d{2}/\d{2})')
 
         lines = full_section.split('\n')
+
+        # First pass: build CUSIP→symbol map from lines that have both
+        cusip_symbol_map = {}
+        for line in lines:
+            cm = re.search(r'(\d{9})\s*/\s*(\w+)', line)
+            if cm:
+                cusip_symbol_map[cm.group(1)] = cm.group(2)
+
         i = 0
         while i < len(lines):
             line = lines[i].strip()
@@ -214,9 +270,17 @@ class Schwab1099BParser(BaseParser):
                     cusip_m = cusip_pattern.search(lines[i + 1])
                     if cusip_m:
                         txn["cusip"] = cusip_m.group(1)
-                        txn["symbol"] = cusip_m.group(2)
+                        txn["symbol"] = cusip_m.group(2) or cusip_symbol_map.get(cusip_m.group(1))
                         txn["date_sold"] = _normalize_date(cusip_m.group(3))
                         i += 1
+                    else:
+                        # Try CUSIP-only line without symbol
+                        cusip_only = re.search(r'(\d{9})\s+(\d{2}/\d{2}/\d{2})', lines[i + 1])
+                        if cusip_only:
+                            txn["cusip"] = cusip_only.group(1)
+                            txn["symbol"] = cusip_symbol_map.get(cusip_only.group(1))
+                            txn["date_sold"] = _normalize_date(cusip_only.group(2))
+                            i += 1
                 transactions.append(txn)
             i += 1
 
@@ -430,6 +494,26 @@ def _extract_section(text: str, start_marker: str, end_marker: str) -> str:
     if end < 0:
         end = start + 5000
     return text[start:end]
+
+
+_DESC_SYMBOL_MAP = {
+    "ADVANCED MICRO": "AMD", "ALPHABET": "GOOGL", "APPLE": "AAPL",
+    "BARRICK GOLD": "GOLD", "BNK OF MON MCRSCT FNG": "FNGA",
+    "MICROSECTORS FANG": "FNGU", "INVESCO NASDAQ 100": "QQQM",
+    "INVESCO QQQ": "QQQ", "ISHARES BITCOIN": "IBIT",
+    "ISHARES NASDAQ TOP": "QTOP", "NVIDIA": "NVDA",
+    "PROSHARES ULTRAPRO QQQ": "TQQQ", "RIVIAN": "RIVN",
+    "TESLA": "TSLA", "UNITEDHEALTH": "UNH", "META PLATFORMS": "META",
+    "MICROSOFT": "MSFT", "SPDR GOLD": "GLD",
+}
+
+
+def _symbol_from_description(desc: str) -> str | None:
+    desc_upper = desc.upper()
+    for key, sym in _DESC_SYMBOL_MAP.items():
+        if key in desc_upper:
+            return sym
+    return None
 
 
 def _extract_section_rfind(text: str, start_marker: str, end_marker: str) -> str:
