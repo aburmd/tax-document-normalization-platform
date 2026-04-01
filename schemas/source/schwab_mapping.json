@@ -1,0 +1,23 @@
+{
+  "broker": "schwab",
+  "source_columns": ["Date", "Action", "Symbol", "Description", "Quantity", "Price", "Fees & Comm", "Amount"],
+  "field_mappings": {
+    "event_date": "Date",
+    "event_type": "Action",
+    "symbol": "Symbol",
+    "security_description": "Description",
+    "quantity": "Quantity",
+    "price_per_share": "Price",
+    "fees": "Fees & Comm",
+    "gross_amount": "Amount"
+  },
+  "event_type_mappings": {
+    "Buy": "BUY",
+    "Sell": "SELL",
+    "Qualified Dividend": "DIVIDEND",
+    "Cash Dividend": "DIVIDEND",
+    "Bank Interest": "INTEREST",
+    "Journal": "JOURNAL",
+    "MoneyLink Transfer": "TRANSFER_OUT"
+  }
+}

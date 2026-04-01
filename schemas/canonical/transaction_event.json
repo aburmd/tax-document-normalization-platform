@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Transaction Event",
+  "type": "object",
+  "required": ["event_id", "document_id", "broker", "event_date", "symbol", "event_type"],
+  "properties": {
+    "event_id": { "type": "string" },
+    "document_id": { "type": "string" },
+    "broker": { "type": "string" },
+    "account_type": { "type": ["string", "null"] },
+    "account_number_masked": { "type": ["string", "null"] },
+    "event_date": { "type": "string", "format": "date" },
+    "settle_date": { "type": ["string", "null"], "format": "date" },
+    "symbol": { "type": "string" },
+    "cusip": { "type": ["string", "null"] },
+    "security_description": { "type": ["string", "null"] },
+    "event_type": {
+      "type": "string",
+      "enum": ["BUY", "SELL", "DIVIDEND", "INTEREST", "TRANSFER_IN", "TRANSFER_OUT", "RSU_VEST", "RSU_SELL_TO_COVER", "RSU_TRANSFER_TO_MARGIN", "JOURNAL", "TAX_WITHHOLDING", "OTHER"]
+    },
+    "quantity": { "type": ["number", "null"] },
+    "price_per_share": { "type": ["number", "null"] },
+    "gross_amount": { "type": ["number", "null"] },
+    "net_amount": { "type": ["number", "null"] },
+    "fees": { "type": ["number", "null"] },
+    "currency": { "type": ["string", "null"] },
+    "notes": { "type": ["string", "null"] },
+    "raw_text_reference": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

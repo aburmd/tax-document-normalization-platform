@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Transfer",
+  "type": "object",
+  "required": ["document_id", "transfer_id", "transfer_date", "symbol"],
+  "properties": {
+    "document_id": { "type": "string" },
+    "transfer_id": { "type": "string" },
+    "transfer_date": { "type": "string", "format": "date" },
+    "from_broker": { "type": ["string", "null"] },
+    "from_account": { "type": ["string", "null"] },
+    "to_broker": { "type": ["string", "null"] },
+    "to_account": { "type": ["string", "null"] },
+    "symbol": { "type": "string" },
+    "quantity": { "type": ["number", "null"] },
+    "transfer_market_value": { "type": ["number", "null"] },
+    "transferred_cost_basis_if_known": { "type": ["number", "null"] },
+    "transfer_type": { "type": ["string", "null"] },
+    "notes": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

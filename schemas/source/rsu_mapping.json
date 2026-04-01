@@ -1,0 +1,21 @@
+{
+  "broker": "rsu",
+  "source_columns": ["Date", "Event Type", "Symbol", "Shares", "FMV Per Share", "Total Value", "Shares Withheld", "Net Shares", "Destination"],
+  "field_mappings": {
+    "event_date": "Date",
+    "event_type": "Event Type",
+    "symbol": "Symbol",
+    "vest_quantity": "Shares",
+    "vest_fmv": "FMV Per Share",
+    "taxable_wages_value": "Total Value",
+    "shares_sold_for_tax": "Shares Withheld",
+    "shares_transferred": "Net Shares",
+    "destination_account": "Destination"
+  },
+  "event_type_mappings": {
+    "Vest": "VEST",
+    "Sell to Cover": "SELL_TO_COVER",
+    "Transfer to Margin": "TRANSFER_TO_MARGIN",
+    "Sale": "RSU_SALE"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Document Metadata",
+  "type": "object",
+  "required": ["document_id", "source_file_name", "source_s3_uri", "broker", "tax_year", "checksum", "ingestion_timestamp"],
+  "properties": {
+    "document_id": { "type": "string" },
+    "source_file_name": { "type": "string" },
+    "source_s3_uri": { "type": "string" },
+    "broker": { "type": "string" },
+    "account_number_masked": { "type": ["string", "null"] },
+    "account_type": { "type": "string" },
+    "tax_year": { "type": "string" },
+    "statement_period_start": { "type": ["string", "null"], "format": "date" },
+    "statement_period_end": { "type": ["string", "null"], "format": "date" },
+    "ingestion_timestamp": { "type": "string", "format": "date-time" },
+    "parser_version": { "type": ["string", "null"] },
+    "parse_status": { "type": ["string", "null"], "enum": ["success", "partial", "failed", null] },
+    "source_format": { "type": ["string", "null"] },
+    "checksum": { "type": "string" }
+  },
+  "additionalProperties": false
+}

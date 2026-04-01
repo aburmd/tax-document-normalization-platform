@@ -1,0 +1,18 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.build/
+
+# SENSITIVE: No documents, PDFs, or sample data in this public repo
+# Store in helper workspace and upload to S3 (encrypted)
+*.pdf
+sample_data/raw/*
+sample_data/normalized/*
+!sample_data/raw/.gitkeep
+!sample_data/normalized/.gitkeep

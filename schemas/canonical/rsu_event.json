@@ -1,0 +1,24 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RSU Event",
+  "type": "object",
+  "required": ["document_id", "rsu_event_id", "event_date", "symbol"],
+  "properties": {
+    "document_id": { "type": "string" },
+    "rsu_event_id": { "type": "string" },
+    "event_date": { "type": "string", "format": "date" },
+    "symbol": { "type": "string" },
+    "vest_quantity": { "type": ["number", "null"] },
+    "vest_fmv": { "type": ["number", "null"] },
+    "taxable_wages_value": { "type": ["number", "null"] },
+    "shares_sold_for_tax": { "type": ["number", "null"] },
+    "shares_transferred": { "type": ["number", "null"] },
+    "destination_account": { "type": ["string", "null"] },
+    "withholding_federal": { "type": ["number", "null"] },
+    "withholding_state": { "type": ["number", "null"] },
+    "withholding_ss": { "type": ["number", "null"] },
+    "withholding_medicare": { "type": ["number", "null"] },
+    "notes": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

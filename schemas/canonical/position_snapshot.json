@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Position Snapshot",
+  "type": "object",
+  "required": ["document_id", "broker", "as_of_date", "symbol"],
+  "properties": {
+    "document_id": { "type": "string" },
+    "broker": { "type": "string" },
+    "account_type": { "type": ["string", "null"] },
+    "as_of_date": { "type": "string", "format": "date" },
+    "symbol": { "type": "string" },
+    "cusip": { "type": ["string", "null"] },
+    "security_description": { "type": ["string", "null"] },
+    "quantity": { "type": ["number", "null"] },
+    "market_value": { "type": ["number", "null"] },
+    "total_cost_basis": { "type": ["number", "null"] },
+    "unrealized_gain_loss": { "type": ["number", "null"] },
+    "source_basis_flag": { "type": ["string", "null"] },
+    "notes": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,22 @@
+{
+  "broker": "fidelity",
+  "source_columns": ["Run Date", "Action", "Symbol", "Security Description", "Quantity", "Price ($)", "Commission ($)", "Amount ($)"],
+  "field_mappings": {
+    "event_date": "Run Date",
+    "event_type": "Action",
+    "symbol": "Symbol",
+    "security_description": "Security Description",
+    "quantity": "Quantity",
+    "price_per_share": "Price ($)",
+    "fees": "Commission ($)",
+    "gross_amount": "Amount ($)"
+  },
+  "event_type_mappings": {
+    "YOU BOUGHT": "BUY",
+    "YOU SOLD": "SELL",
+    "DIVIDEND RECEIVED": "DIVIDEND",
+    "INTEREST EARNED": "INTEREST",
+    "TRANSFERRED FROM": "TRANSFER_IN",
+    "TRANSFERRED TO": "TRANSFER_OUT"
+  }
+}
