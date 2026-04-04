@@ -16,6 +16,7 @@ _PARSERS: dict[str, type[BaseParser]] = {
     "fidelity_taxytd": FidelityTaxYtdParser,
     "robinhood_1099b": Robinhood1099BParser,
     "webull_1099b": Webull1099BParser,
+    "ameritrade_1099b": Robinhood1099BParser,
     "rsu": RsuParser,
 }
 
@@ -24,6 +25,7 @@ _BROKER_DEFAULTS: dict[str, str] = {
     "fidelity": "fidelity_statement",
     "robinhood": "robinhood_1099b",
     "webull": "webull_1099b",
+    "ameritrade": "ameritrade_1099b",
     "rsu": "rsu",
 }
 

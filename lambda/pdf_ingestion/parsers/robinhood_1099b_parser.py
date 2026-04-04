@@ -277,7 +277,7 @@ class Robinhood1099BParser(BaseParser):
             if line.startswith("Securitytotal:") or line.startswith("Totals:"):
                 continue
 
-            # Skip "Total of N transactions" lines (have "Various" as date_acq)
+            # Skip "Total of N transactions" lines (aggregates that may overlap with individual lots)
             if "Total of" in line and "transactions" in line:
                 pending_date_sold = None
                 continue
