@@ -13,19 +13,26 @@ class Fidelity1099BParser(BaseParser):
         with pdfplumber.open(file_path) as pdf:
             for page in pdf.pages:
                 full_text += (page.extract_text() or "") + "\n"
+        transactions = self._parse_1099b_transactions(full_text)
+        rsu_lots = self._parse_rsu_supplemental(full_text)
+        if rsu_lots:
+            self._enrich_rsu_transactions(transactions, rsu_lots)
         return {
             "full_text": full_text,
             "metadata": metadata,
             "dividends": self._parse_1099_div(full_text),
             "summary": self._parse_1099b_summary(full_text),
-            "transactions": self._parse_1099b_transactions(full_text),
+            "transactions": transactions,
+            "rsu_lots": rsu_lots,
         }
 
     def to_canonical(self, raw_data: dict, mapping: dict, doc_meta: dict) -> dict:
         doc_meta["account_number_masked"] = self._extract_masked_account(raw_data["full_text"])
         doc_meta["tax_year"] = self._extract_tax_year(raw_data["full_text"])
         doc_meta["parse_status"] = "success"
-        doc_meta["source_format"] = "fidelity_1099b_composite"
+        has_rsu = bool(raw_data.get("rsu_lots"))
+        doc_meta["source_format"] = "fidelity_1099b_rsu" if has_rsu else "fidelity_1099b_composite"
+        warnings = self._cross_validate(raw_data) if has_rsu else []
         return {
             "document_metadata": doc_meta,
             "dividends_1099div": [raw_data["dividends"]],
@@ -35,8 +42,8 @@ class Fidelity1099BParser(BaseParser):
             "realized_gain_loss_detail": [],
             "positions": [],
             "transfers": [],
-            "rsu_events": [],
-            "warnings": [],
+            "rsu_events": raw_data.get("rsu_lots", []),
+            "warnings": warnings,
         }
 
     def _extract_masked_account(self, text: str) -> str:
@@ -178,8 +185,116 @@ class Fidelity1099BParser(BaseParser):
         return transactions
 
     def _fix_wash_sales(self, transactions: list, text: str):
-        """No-op — wash sales are now handled inline during parsing."""
         pass
+
+    def _parse_rsu_supplemental(self, text: str) -> list:
+        """Parse Supplemental Stock Plan Lot Detail section."""
+        lots = []
+        in_section = False
+        current_symbol = None
+        current_cusip = None
+        current_description = None
+        holding = "SHORT_TERM"
+
+        for line in text.split('\n'):
+            line = line.strip()
+            if 'Supplemental Stock Plan Lot Detail' in line:
+                in_section = True
+                continue
+            if not in_section:
+                continue
+            ll = line.lower()
+            if 'short-term transactions' in ll:
+                holding = "SHORT_TERM"
+                continue
+            if 'long-term transactions' in ll:
+                holding = "LONG_TERM"
+                continue
+
+            # Security header
+            sec_m = re.match(r'^(.+?),\s*([A-Z][A-Z0-9]{0,4}),\s*([A-Z0-9]{9})$', line)
+            if sec_m:
+                current_description = sec_m.group(1).strip()
+                current_symbol = sec_m.group(2)
+                current_cusip = sec_m.group(3)
+                continue
+
+            # RSU lot: GRANT_TYPE QTY DATE_ACQ DATE_SOLD PROCEEDS ORD_INCOME ADJ_COST WASH ADJ_GL
+            lot_m = re.match(
+                r'(RSU|RSA|NQSOP|NQSP|DO|QSP|QSOP|SAR|NSR)\s+'
+                r'([\d,.]+)\s+'           # quantity
+                r'(\d{2}/\d{2}/\d{2})\s+' # date acquired
+                r'(\d{2}/\d{2}/\d{2})\s+' # date sold
+                r'([\d,.]+)\s+'           # proceeds
+                r'([\d,.]+)\s+'           # ordinary income reported
+                r'([\d,.]+)\s+'           # adjusted cost basis
+                r'([\d,.]+)\s+'           # wash sale
+                r'(-?[\d,.]+)',            # adjusted gain/loss
+                line
+            )
+            if lot_m and current_symbol:
+                lots.append({
+                    "grant_type": lot_m.group(1),
+                    "symbol": current_symbol,
+                    "cusip": current_cusip,
+                    "description": current_description,
+                    "quantity": _parse_amount(lot_m.group(2)),
+                    "date_acquired": _normalize_date(lot_m.group(3)),
+                    "date_sold": _normalize_date(lot_m.group(4)),
+                    "proceeds": _parse_amount(lot_m.group(5)),
+                    "ordinary_income_reported": _parse_amount(lot_m.group(6)),
+                    "adjusted_cost_basis": _parse_amount(lot_m.group(7)),
+                    "wash_sale_loss_disallowed": _parse_amount(lot_m.group(8)),
+                    "adjusted_gain_loss": _parse_signed(lot_m.group(9)),
+                    "holding_period": holding,
+                    "is_rsu": True,
+                })
+        return lots
+
+    def _enrich_rsu_transactions(self, transactions: list, rsu_lots: list):
+        """Enrich 1099-B transactions with adjusted cost basis from RSU supplemental."""
+        # Build lookup: (symbol, date_acquired, date_sold, proceeds) -> rsu_lot
+        rsu_map = {}
+        for lot in rsu_lots:
+            key = (lot["symbol"], lot["date_acquired"], lot["date_sold"], lot["proceeds"])
+            rsu_map[key] = lot
+
+        for txn in transactions:
+            key = (txn["symbol"], txn["date_acquired"], txn["date_sold"], txn["proceeds"])
+            rsu = rsu_map.get(key)
+            if rsu:
+                txn["is_rsu"] = True
+                txn["grant_type"] = rsu["grant_type"]
+                txn["ordinary_income_reported"] = rsu["ordinary_income_reported"]
+                txn["adjusted_cost_basis"] = rsu["adjusted_cost_basis"]
+                txn["adjusted_gain_loss"] = rsu["adjusted_gain_loss"]
+
+    def _cross_validate(self, raw_data: dict) -> list:
+        """Cross-validate RSU supplemental totals against 1099-B transactions."""
+        warnings = []
+        rsu_lots = raw_data.get("rsu_lots", [])
+        txns = raw_data.get("transactions", [])
+        if not rsu_lots:
+            return warnings
+
+        rsu_proceeds = sum(l["proceeds"] for l in rsu_lots)
+        rsu_txns = [t for t in txns if t.get("is_rsu")]
+        txn_proceeds = sum(t["proceeds"] for t in rsu_txns)
+
+        if abs(rsu_proceeds - txn_proceeds) > 0.02:
+            warnings.append(
+                f"RSU supplemental proceeds ({rsu_proceeds:.2f}) != "
+                f"matched 1099-B proceeds ({txn_proceeds:.2f}), "
+                f"diff={rsu_proceeds - txn_proceeds:.2f}"
+            )
+        else:
+            logger.info("RSU cross-validation passed: proceeds=%.2f, %d lots matched",
+                        rsu_proceeds, len(rsu_lots))
+
+        unmatched = len(rsu_lots) - len(rsu_txns)
+        if unmatched:
+            warnings.append(f"{unmatched} RSU supplemental lots not matched to 1099-B transactions")
+        return warnings
 
     @staticmethod
     def _summary_to_list(summary: dict) -> list:

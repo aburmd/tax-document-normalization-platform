@@ -17,6 +17,7 @@ _PARSERS: dict[str, type[BaseParser]] = {
     "robinhood_1099b": Robinhood1099BParser,
     "webull_1099b": Webull1099BParser,
     "ameritrade_1099b": Robinhood1099BParser,
+    "fidelity_rsu": Fidelity1099BParser,
     "rsu": RsuParser,
 }
 
