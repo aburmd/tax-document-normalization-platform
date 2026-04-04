@@ -46,7 +46,7 @@ def route_parser(broker: str, doc_type: str = None) -> BaseParser:
 
 def detect_doc_type(text: str) -> str:
     text_lower = text[:5000].lower()
-    if "form 1099" in text_lower or "1099-b" in text_lower or "tax reporting statement" in text_lower:
+    if "form 1099" in text_lower or "1099-b" in text_lower or "tax reporting statement" in text_lower or "forms 1099" in text_lower:
         return "1099b"
     if "tax info ytd" in text_lower or "realized gain/loss" in text_lower and "year-to-date" in text_lower:
         return "taxytd"

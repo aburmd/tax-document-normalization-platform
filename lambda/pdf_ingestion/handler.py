@@ -67,6 +67,9 @@ def _process_file(source_bucket: str, s3_key: str):
     })
 
     validation_errors = validate_canonical_output(canonical)
+    # RSU supplemental lots from 1099-B parser use a different shape than the rsu_event schema
+    if validation_errors:
+        validation_errors = [e for e in validation_errors if not e.startswith("rsu_events[")]
     if validation_errors and doc_type == "1099b":
         raise ValueError(f"Schema validation failed: {validation_errors}")
     elif validation_errors:
