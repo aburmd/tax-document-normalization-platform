@@ -4,6 +4,7 @@ from parsers.schwab_1099b_parser import Schwab1099BParser
 from parsers.fidelity_statement_parser import FidelityStatementParser
 from parsers.fidelity_1099b_parser import Fidelity1099BParser
 from parsers.fidelity_taxytd_parser import FidelityTaxYtdParser
+from parsers.robinhood_1099b_parser import Robinhood1099BParser
 from parsers.rsu_parser import RsuParser
 
 _PARSERS: dict[str, type[BaseParser]] = {
@@ -12,12 +13,14 @@ _PARSERS: dict[str, type[BaseParser]] = {
     "fidelity_statement": FidelityStatementParser,
     "fidelity_1099b": Fidelity1099BParser,
     "fidelity_taxytd": FidelityTaxYtdParser,
+    "robinhood_1099b": Robinhood1099BParser,
     "rsu": RsuParser,
 }
 
 _BROKER_DEFAULTS: dict[str, str] = {
     "schwab": "schwab_statement",
     "fidelity": "fidelity_statement",
+    "robinhood": "robinhood_1099b",
     "rsu": "rsu",
 }
 
