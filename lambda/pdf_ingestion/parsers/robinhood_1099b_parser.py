@@ -277,7 +277,10 @@ class Robinhood1099BParser(BaseParser):
             if line.startswith("Securitytotal:") or line.startswith("Totals:"):
                 continue
 
-            # Skip "Total of N transactions" lines (aggregates that may overlap with individual lots)
+            # Skip "Total of N transactions" lines — these are aggregates that overlap
+            # with individual lots already parsed. In Ameritrade 2023, some lots are ONLY
+            # represented as grouped totals (individual lots not listed), but capturing
+            # them would double-count lots that ARE listed. The PDF summary is authoritative.
             if "Total of" in line and "transactions" in line:
                 pending_date_sold = None
                 continue

@@ -225,7 +225,18 @@ class Schwab1099BParser(BaseParser):
         txn_pattern = re.compile(
             r'(\d+)\s+'                          # quantity
             r'(.+?)\s+'                          # description
-            r'(S|SC)\s+'                         # term indicator (S=sold, SC=sold to close)
+            r'(S|SC|X)\s+'                       # term indicator (S=sold, SC=sold to close, X=expired)
+            r'(\d{2}/\d{2}/\d{2}|VARIOUS)\s+'   # date acquired
+            r'\$\s*([\d,.]+)\s+'                 # proceeds
+            r'\$\s*([\d,.]+)\s+'                 # cost basis
+            r'(--|\$\s*[\d,.]+)\s+'              # wash sale
+            r'\$?\s*\(?([\d,.]+)\)?'             # gain/loss
+        )
+        # Option transaction pattern: QTY CALL/PUT DESC $STRIKE EXP ACTION DATE $ PROCEEDS $ COST WASH $ (GAIN)
+        opt_txn_pattern = re.compile(
+            r'(\d+)\s+'                          # quantity
+            r'((?:CALL|PUT)\s+.+?\$[\d,.]+\s+EX\w*)\s+' # option description with $strike
+            r'(S|SC|X)\s+'                       # action
             r'(\d{2}/\d{2}/\d{2}|VARIOUS)\s+'   # date acquired
             r'\$\s*([\d,.]+)\s+'                 # proceeds
             r'\$\s*([\d,.]+)\s+'                 # cost basis
@@ -246,7 +257,10 @@ class Schwab1099BParser(BaseParser):
         i = 0
         while i < len(lines):
             line = lines[i].strip()
-            m = txn_pattern.search(line)
+            # Try option pattern first (has $ in description)
+            m = opt_txn_pattern.search(line)
+            if not m:
+                m = txn_pattern.search(line)
             if m:
                 txn = {
                     "quantity": float(m.group(1)),
@@ -261,8 +275,12 @@ class Schwab1099BParser(BaseParser):
                     "symbol": None,
                     "date_sold": None,
                 }
-                # Check if gain is actually a loss (negative in original)
-                if "(" in line and txn["realized_gain_loss"] > 0:
+                # Check if gain is actually a loss — look for () around the last $ amount
+                last_dollar = line.rfind('$')
+                if last_dollar >= 0 and '(' in line[last_dollar:] and txn["realized_gain_loss"] > 0:
+                    txn["realized_gain_loss"] = -txn["realized_gain_loss"]
+                # Also check for $(amount) pattern (no space between $ and parens)
+                if re.search(r'\$\s*\([\d,.]+\)', line) and txn["realized_gain_loss"] > 0:
                     txn["realized_gain_loss"] = -txn["realized_gain_loss"]
 
                 # Look for CUSIP/symbol on next line
@@ -338,8 +356,14 @@ class Schwab1099BParser(BaseParser):
             m = txn_pattern.search(line)
             if m:
                 gain_loss = _parse_amount(m.group(9))
-                if "(" in line[line.rfind("$"):]:
+                # Check for parentheses around the gain/loss value
+                # Look at the portion of the line after the last $ sign
+                last_dollar_idx = line.rfind('$')
+                if last_dollar_idx >= 0 and '(' in line[last_dollar_idx:]:
                     gain_loss = -gain_loss
+                # Also handle $(amount) with no space
+                if re.search(r'\$\s*\([\d,.]+\)\s*$', line):
+                    gain_loss = -abs(gain_loss)
 
                 transactions.append({
                     "description": m.group(1).strip(),

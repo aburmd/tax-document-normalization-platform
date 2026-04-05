@@ -76,32 +76,35 @@ class Fidelity1099BParser(BaseParser):
     def _parse_1099b_summary(self, text: str) -> dict:
         summary = {}
         # Lines have no spaces between words: "Short-termtransactionsforwhichbasisisreportedtotheIRS 163,399.99 ..."
+        # GL can be negative (-421.45), so use -? prefix. Some years have 6 columns (extra fed tax withheld).
+        _NUM = r'(-?[\d,.]+)'
+        _OPT = r'(?:\s+-?[\d,.]+)?'  # optional trailing column
         patterns = [
-            ("short_term_reported", r'Short-termtransactionsforwhichbasisisreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
-            ("short_term_not_reported", r'Short-termtransactionsforwhichbasisisnotreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
-            ("long_term_reported", r'Long-termtransactionsforwhichbasisisreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
-            ("long_term_not_reported", r'Long-termtransactionsforwhichbasisisnotreportedtotheIRS\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)'),
+            ("short_term_reported", rf'Short-termtransactionsforwhichbasisisreportedtotheIRS\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}{_OPT}'),
+            ("short_term_not_reported", rf'Short-termtransactionsforwhichbasisisnotreportedtotheIRS\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}{_OPT}'),
+            ("long_term_reported", rf'Long-termtransactionsforwhichbasisisreportedtotheIRS\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}{_OPT}'),
+            ("long_term_not_reported", rf'Long-termtransactionsforwhichbasisisnotreportedtotheIRS\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}\s+{_NUM}{_OPT}'),
         ]
         for key, pattern in patterns:
             m = re.search(pattern, text)
             if m:
                 summary[key] = {
-                    "proceeds": _parse_amount(m.group(1)),
-                    "cost_basis": _parse_amount(m.group(2)),
-                    "market_discount": _parse_amount(m.group(3)),
-                    "wash_sale": _parse_amount(m.group(4)),
-                    "gain_loss": _parse_amount(m.group(5)),
+                    "proceeds": _parse_signed(m.group(1)),
+                    "cost_basis": _parse_signed(m.group(2)),
+                    "market_discount": _parse_signed(m.group(3)),
+                    "wash_sale": _parse_signed(m.group(4)),
+                    "gain_loss": _parse_signed(m.group(5)),
                 }
 
-        # Total line: starts with a large number (total proceeds)
-        total_m = re.search(r'^([\d,]+\.\d{2})\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)\s+([\d,.]+)$', text, re.MULTILINE)
+        # Total line: starts with a large number (total proceeds), 5 or 6 columns
+        total_m = re.search(r'^(-?[\d,]+\.\d{2})\s+(-?[\d,.]+)\s+(-?[\d,.]+)\s+(-?[\d,.]+)\s+(-?[\d,.]+)(?:\s+-?[\d,.]+)?\s*$', text, re.MULTILINE)
         if total_m:
             summary["total"] = {
-                "proceeds": _parse_amount(total_m.group(1)),
-                "cost_basis": _parse_amount(total_m.group(2)),
-                "market_discount": _parse_amount(total_m.group(3)),
-                "wash_sale": _parse_amount(total_m.group(4)),
-                "gain_loss": _parse_amount(total_m.group(5)),
+                "proceeds": _parse_signed(total_m.group(1)),
+                "cost_basis": _parse_signed(total_m.group(2)),
+                "market_discount": _parse_signed(total_m.group(3)),
+                "wash_sale": _parse_signed(total_m.group(4)),
+                "gain_loss": _parse_signed(total_m.group(5)),
             }
         return summary
 
@@ -131,14 +134,25 @@ class Fidelity1099BParser(BaseParser):
                 continue
 
             # Security header: DESCRIPTION,SYMBOL,CUSIP
-            sec_m = re.match(r'^(.+?),\s*([A-Z][A-Z0-9]{0,4}),\s*([A-Z0-9]{9})$', line)
+            # Symbol can be up to ~10 chars for options (e.g. AMZN23021)
+            sec_m = re.match(r'^(.+?),\s*([A-Z][A-Z0-9]{0,9}),\s*([A-Z0-9]{9}\w*)$', line)
             if sec_m:
                 current_description = sec_m.group(1).strip()
                 current_symbol = sec_m.group(2)
                 current_cusip = sec_m.group(3)
                 continue
 
-            # Transaction line: Sale QTY DATE_ACQ DATE_SOLD PROCEEDS COST_BASIS [GAIN_LOSS] [WASH_SALE]
+            # ISIN-format header: DESCRIPTION ISIN #XXXXXXXXXXXX
+            isin_m = re.match(r'^(.+?)\s+ISIN\s+#?([A-Z0-9,]+)$', line)
+            if isin_m:
+                current_description = isin_m.group(1).strip()
+                current_cusip = isin_m.group(2).replace(',', '')
+                # Extract symbol from description if possible
+                words = current_description.split()
+                current_symbol = words[0] if words else "UNKNOWN"
+                continue
+
+            # Transaction line: Sale QTY DATE_ACQ DATE_SOLD PROCEEDS COST_BASIS [WASH_SALE] [GAIN_LOSS]
             txn_m = re.match(
                 r'Sale\s+'
                 r'([\d,.]+)\s+'           # quantity
@@ -155,12 +169,12 @@ class Fidelity1099BParser(BaseParser):
                 rest = txn_m.group(6).strip()
 
                 # Parse remaining numbers from rest of line
+                # PDF column order: Wash Sale | Gain/Loss (-)
                 nums = re.findall(r'-?[\d,.]+', rest)
                 wash_sale = 0.0
                 if len(nums) >= 2:
-                    # Format: GAIN -WASH
-                    gain_loss = _parse_signed(nums[0])
-                    wash_sale = abs(_parse_signed(nums[1]))
+                    wash_sale = abs(_parse_signed(nums[0]))
+                    gain_loss = _parse_signed(nums[1])
                 elif len(nums) == 1:
                     gain_loss = _parse_signed(nums[0])
                 else:

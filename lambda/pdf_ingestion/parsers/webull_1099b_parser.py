@@ -98,7 +98,7 @@ class Webull1099BParser(BaseParser):
 
     def _parse_sale_summary(self, text: str) -> list:
         summary = []
-        section = re.search(r'Summary Of Sale Proceeds.*?(?=Page \d|Proceeds from Broker|$)', text, re.DOTALL | re.IGNORECASE)
+        section = re.search(r'Summary Of Sale Proceeds.*?(?=ORIGINAL ISSUE|INTEREST INCOME|Miscellaneous|REGULATED|Page \d+\s+of|\Z)', text, re.DOTALL | re.IGNORECASE)
         if not section:
             return summary
         block = section.group(0)
