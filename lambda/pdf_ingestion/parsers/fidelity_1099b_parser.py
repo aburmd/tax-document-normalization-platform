@@ -152,19 +152,20 @@ class Fidelity1099BParser(BaseParser):
                 current_symbol = words[0] if words else "UNKNOWN"
                 continue
 
-            # Transaction line: Sale QTY DATE_ACQ DATE_SOLD PROCEEDS COST_BASIS [WASH_SALE] [GAIN_LOSS]
+            # Transaction line: ACTION QTY DATE_ACQ DATE_SOLD PROCEEDS COST_BASIS [WASH_SALE] [GAIN_LOSS]
+            # Actions: Sale (normal), Expire (option expiry), Principal (bond/ETF principal return)
             txn_m = re.match(
-                r'Sale\s+'
+                r'(?:Sale|Expire|Principal)\s+'
                 r'([\d,.]+)\s+'           # quantity
                 r'(\d{2}/\d{2}/\d{2})\s+' # date acquired
                 r'(\d{2}/\d{2}/\d{2})\s+' # date sold
-                r'([\d,.]+)\s+'           # proceeds
+                r'(-?[\d,.]+)\s+'         # proceeds (can be negative for option assignments)
                 r'([\d,.]+)'              # cost basis
                 r'(.*)',                   # rest of line (gain, wash)
                 line
             )
             if txn_m and current_symbol:
-                proceeds = _parse_amount(txn_m.group(4))
+                proceeds = _parse_signed(txn_m.group(4))
                 cost_basis = _parse_amount(txn_m.group(5))
                 rest = txn_m.group(6).strip()
 

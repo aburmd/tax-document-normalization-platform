@@ -222,6 +222,7 @@ class Schwab1099BParser(BaseParser):
         #         CUSIP / SYMBOL DATE
         # Multi-line: first line has qty, description, term, date_acquired, proceeds, cost, wash, gain
         #             second line has CUSIP / symbol, date_sold
+        _WASH = r'(--|\$\s*--|\$\s*[\d,.]+)'    # wash sale: --, $ --, or $ amount
         txn_pattern = re.compile(
             r'(\d+)\s+'                          # quantity
             r'(.+?)\s+'                          # description
@@ -229,7 +230,7 @@ class Schwab1099BParser(BaseParser):
             r'(\d{2}/\d{2}/\d{2}|VARIOUS)\s+'   # date acquired
             r'\$\s*([\d,.]+)\s+'                 # proceeds
             r'\$\s*([\d,.]+)\s+'                 # cost basis
-            r'(--|\$\s*[\d,.]+)\s+'              # wash sale
+            + _WASH + r'\s+'                     # wash sale
             r'\$?\s*\(?([\d,.]+)\)?'             # gain/loss
         )
         # Option transaction pattern: QTY CALL/PUT DESC $STRIKE EXP ACTION DATE $ PROCEEDS $ COST WASH $ (GAIN)
@@ -240,7 +241,7 @@ class Schwab1099BParser(BaseParser):
             r'(\d{2}/\d{2}/\d{2}|VARIOUS)\s+'   # date acquired
             r'\$\s*([\d,.]+)\s+'                 # proceeds
             r'\$\s*([\d,.]+)\s+'                 # cost basis
-            r'(--|\$\s*[\d,.]+)\s+'              # wash sale
+            + _WASH + r'\s+'                     # wash sale
             r'\$?\s*\(?([\d,.]+)\)?'             # gain/loss
         )
         cusip_pattern = re.compile(r'(\d{9})\s*/?\s*(\w+)?\s+(\d{2}/\d{2}/\d{2})')
@@ -391,6 +392,11 @@ class Schwab1099BParser(BaseParser):
         )
         for m in opt_pattern.finditer(ye_text):
             gain_loss = _parse_amount(m.group(11))
+            # Detect loss via parentheses in the matched region
+            match_text = m.group(0)
+            last_dollar = match_text.rfind('$')
+            if last_dollar >= 0 and '(' in match_text[last_dollar:]:
+                gain_loss = -gain_loss
             opt_type = "CALL" if m.group(4) == "C" else "PUT"
             transactions.append({
                 "description": f"{opt_type} {m.group(1)} ${m.group(3)} EXP {m.group(2)}",
