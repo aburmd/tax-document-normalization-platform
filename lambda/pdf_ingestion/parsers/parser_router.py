@@ -7,6 +7,7 @@ from parsers.fidelity_taxytd_parser import FidelityTaxYtdParser
 from parsers.robinhood_1099b_parser import Robinhood1099BParser
 from parsers.webull_1099b_parser import Webull1099BParser
 from parsers.etrade_1099b_parser import Etrade1099BParser
+from parsers.ameritrade_realized_gl_parser import Ameritrade1099BParser
 from parsers.rsu_parser import RsuParser
 
 _PARSERS: dict[str, type[BaseParser]] = {
@@ -17,7 +18,8 @@ _PARSERS: dict[str, type[BaseParser]] = {
     "fidelity_taxytd": FidelityTaxYtdParser,
     "robinhood_1099b": Robinhood1099BParser,
     "webull_1099b": Webull1099BParser,
-    "ameritrade_1099b": Robinhood1099BParser,
+    "ameritrade_1099b": Ameritrade1099BParser,
+    "ameritrade_realized_gl": Ameritrade1099BParser,
     "fidelity_rsu": Fidelity1099BParser,
     "etrade_1099b": Etrade1099BParser,
     "rsu": RsuParser,
