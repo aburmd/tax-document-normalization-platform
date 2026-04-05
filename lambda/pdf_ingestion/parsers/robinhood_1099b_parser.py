@@ -240,6 +240,7 @@ class Robinhood1099BParser(BaseParser):
         current_description = None
         current_cusip = None
         pending_date_sold = None
+        _in_grouped_block = False
 
         lines = text.split("\n")
         for i, line in enumerate(lines):
@@ -271,27 +272,31 @@ class Robinhood1099BParser(BaseParser):
             group_m = re.match(r'\d+ transactions for (\d{2}/\d{2}/\d{2})', line)
             if group_m:
                 pending_date_sold = group_m.group(1)
+                _in_grouped_block = True
                 continue
 
             # Skip summary lines
             if line.startswith("Securitytotal:") or line.startswith("Totals:"):
                 continue
 
-            # Skip "Total of N transactions" lines — these are aggregates that overlap
-            # with individual lots already parsed. In Ameritrade 2023, some lots are ONLY
-            # represented as grouped totals (individual lots not listed), but capturing
-            # them would double-count lots that ARE listed. The PDF summary is authoritative.
+            # "Total of N transactions" lines: skip if individual lots were listed
+            # (Robinhood pattern: preceded by "N transactions for DATE" block),
+            # but capture if lots are NOT listed (Ameritrade pattern: standalone grouped total).
             if "Total of" in line and "transactions" in line:
-                pending_date_sold = None
-                continue
+                if _in_grouped_block:
+                    _in_grouped_block = False
+                    pending_date_sold = None
+                    continue
+                # Fall through to txn_m regex below — line has valid proceeds/cost/GL
 
             # Format 1: DATE_SOLD QTY PROCEEDS DATE_ACQ COST REST
+            # Also matches "Total of N transactions" lines (date_acquired = Various)
             txn_m = re.match(
                 r'(\d{2}/\d{2}/\d{2})\s+'
                 r'([\d,.]+)\s+'
-                r'([\d,.]+)\s+'
-                r'(\d{2}/\d{2}/\d{2})\s+'
-                r'([\d,.]+)\s+'
+                r'(-?[\d,.]+)\s+'
+                r'(\d{2}/\d{2}/\d{2}|Various)\s+'
+                r'(-?[\d,.]+)\s+'
                 r'(.*)',
                 line
             )
