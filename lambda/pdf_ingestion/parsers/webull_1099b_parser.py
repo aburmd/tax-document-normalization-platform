@@ -15,14 +15,17 @@ class Webull1099BParser(BaseParser):
                 full_text += (page.extract_text() or "") + "\n"
         fmt = "iso" if re.search(r'\d{4}-\d{2}-\d{2}', full_text) else "us"
         logger.info("Detected Webull date format: %s", fmt)
+        txns = self._parse_transactions(full_text, fmt)
+        summary = self._parse_sale_summary(full_text)
+        self._apply_wash_sale_adjustment(txns, summary)
         return {
             "full_text": full_text,
             "metadata": metadata,
             "format": fmt,
             "dividends": self._parse_1099_div(full_text),
             "interest": self._parse_1099_int(full_text),
-            "transactions": self._parse_transactions(full_text, fmt),
-            "summary": self._parse_sale_summary(full_text),
+            "transactions": txns,
+            "summary": summary,
         }
 
     def to_canonical(self, raw_data: dict, mapping: dict, doc_meta: dict) -> dict:
@@ -248,6 +251,32 @@ class Webull1099BParser(BaseParser):
                 })
 
         return transactions
+
+    @staticmethod
+    def _apply_wash_sale_adjustment(transactions: list, summary: list):
+        """Webull/Apex individual lines show wash=0; summary has the real wash amounts.
+        When parsed GL differs from summary GL, add an adjustment entry so totals match."""
+        if not transactions or not summary:
+            return
+        total_summary = {"proceeds": 0, "cost_basis": 0, "wash_sale": 0, "gain_loss": 0}
+        for s in summary:
+            if "total" in s.get("category", ""):
+                for k in total_summary:
+                    total_summary[k] += s.get(k, 0)
+        parsed_gl = round(sum(t["realized_gain_loss"] for t in transactions), 2)
+        summary_gl = round(total_summary["gain_loss"], 2)
+        diff = round(summary_gl - parsed_gl, 2)
+        if abs(diff) > 0.10 and total_summary["wash_sale"] > 0:
+            transactions.append({
+                "description": "WASH SALE GL ADJUSTMENT (from PDF summary)",
+                "cusip": "", "symbol": "WASH_ADJ",
+                "quantity": 0, "date_sold": "", "date_acquired": "",
+                "proceeds": 0.0, "cost_basis": 0.0, "market_discount": 0.0,
+                "wash_sale_loss_disallowed": total_summary["wash_sale"],
+                "realized_gain_loss": diff,
+                "section": "wash_sale_adjustment",
+                "holding_period": "SHORT_TERM",
+            })
 
     def _cross_validate(self, transactions: list, summary: list) -> list:
         warnings = []
